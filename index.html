@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
 <meta name="theme-color" content="#000000">
-<title>StageEye v0.9 AUTO Director · DUO/TRIO</title>
+<title>StageEye v1.0 AUTO Director · DUO/TRIO</title>
 <style>
 :root { color-scheme: dark; }
 * { box-sizing: border-box; }
@@ -52,22 +52,18 @@ button:disabled { opacity: .45; }
 #cam1Btn, #cam2Btn { min-width: 68px; padding-inline: 12px; }
 .modeBtn { min-width: 66px; padding-inline: 12px; }
 .modeBtn.selected { background: #174e67; border-color: #63b9df; box-shadow: inset 0 0 0 1px #63b9df; }
-#duoPair { max-width: 156px; min-width: 130px; padding: 13px 10px; border-radius: 10px;
-  border: 1px solid rgba(255,255,255,.25); background: #222; color: white; font-size: 14px; }
-#duoPair.hidden { display: none; }
 @media (max-width: 380px) {
   #controls { gap: 6px; padding: 7px; }
   button { min-width: 60px; padding: 12px 9px; font-size: 14px; }
   #autoBtn { min-width: 104px; }
   #cam1Btn, #cam2Btn { min-width: 56px; padding-inline: 8px; }
   .modeBtn { min-width: 56px; padding-inline: 8px; }
-  #duoPair { min-width: 112px; max-width: 132px; font-size: 12px; }
 }
 @media (orientation: portrait) {
   #status { top: max(10px, env(safe-area-inset-top)); }
 }
 </style>
-<script type="text/javascript" nonce="9fbb8002d6cb41a3b18e3dd4e8e" src="//local.adguard.org?ts=1791999129388&amp;type=content-script&amp;dmn=chatgpt.com&amp;url=https%3A%2F%2Fchatgpt.com%2Fbackend-api%2Festuary%2Fcontent%3Fid%3Dfile_000000009278820e933678fde39711c0%26fn%3DStageEye_v0.9_AUTO_Director_DUO_TRIO.html%26cd%3Dattachment%26ts%3D497777%26p%3Dfs%26cid%3D1%26sig%3Dbb07040bb8e07b36d11d50ff1c90f346652dfc300338ac02d0a902b00f081f29%26v%3D0&amp;app=chrome.exe&amp;css=2&amp;js=1&amp;rel=1&amp;rji=1&amp;sbe=1"></script><script type="text/javascript" nonce="9fbb8002d6cb41a3b18e3dd4e8e" src="//local.adguard.org?ts=1791999129388&amp;name=AdGuard%20Extra&amp;name=AdGuard%20Popup%20Blocker&amp;type=user-script"></script></head>
+<script type="text/javascript" nonce="9fbb8002d6cb41a3b18e3dd4e8e" src="//local.adguard.org?ts=1791999129388&amp;type=content-script&amp;dmn=chatgpt.com&amp;url=https%3A%2F%2Fchatgpt.com%2Fbackend-api%2Festuary%2Fcontent%3Fid%3Dfile_00000000c8f0820cabadc961d673581d%26fn%3DStageEye_v1.0_AUTO_Director_DUO_TRIO_LeftRightWide.html%26cd%3Dattachment%26ts%3D497778%26p%3Dfs%26cid%3D1%26sig%3Dc4e6236367fed39a7d18589ced8c026f29649314755d0142a03132a37e3b9c6e%26v%3D0&amp;app=chrome.exe&amp;css=2&amp;js=1&amp;rel=1&amp;rji=1&amp;sbe=1"></script><script type="text/javascript" nonce="9fbb8002d6cb41a3b18e3dd4e8e" src="//local.adguard.org?ts=1791999129388&amp;name=AdGuard%20Extra&amp;name=AdGuard%20Popup%20Blocker&amp;type=user-script"></script></head>
 <body>
 <div id="stage">
   <video id="videoA" autoplay playsinline muted></video>
@@ -77,12 +73,7 @@ button:disabled { opacity: .45; }
     <button id="cam1Btn" type="button">CAM1</button>
     <button id="duoModeBtn" class="modeBtn" type="button" aria-pressed="false">DUO</button>
     <button id="trioModeBtn" class="modeBtn selected" type="button" aria-pressed="true">TRIO</button>
-    <select id="duoPair" class="hidden" aria-label="DUOの組み合わせ">
-      <option value="vocalPiano">VOCAL + PIANO</option>
-      <option value="bassPiano">BASS + PIANO</option>
-      <option value="bassVocal">BASS + VOCAL</option>
-    </select>
-    <button id="autoBtn" type="button" aria-pressed="false">AUTO START</button>
+<button id="autoBtn" type="button" aria-pressed="false">AUTO START</button>
     <button id="cam2Btn" type="button">CAM2</button>
   </div>
 </div>
@@ -101,7 +92,6 @@ button:disabled { opacity: .45; }
   const cam2Btn = document.getElementById("cam2Btn");
   const duoModeBtn = document.getElementById("duoModeBtn");
   const trioModeBtn = document.getElementById("trioModeBtn");
-  const duoPairSelect = document.getElementById("duoPair");
 
   let currentStream = null;
   let activeFacing = null;
@@ -115,7 +105,8 @@ button:disabled { opacity: .45; }
   let performanceMode = "trio";
 
   // AUTO sequence timings (milliseconds).
-  // TRIO cycles through all three performers; DUO only visits the selected pair.
+  // DUO: left position, full stage, right position — no performer-pair selection.
+  // TRIO: retain the three-performer sequence.
   const trioSequence = [
     { shot: "wide",  time: 5000 },
     { shot: "vocal", time: 11000 },
@@ -125,28 +116,17 @@ button:disabled { opacity: .45; }
     { shot: "bass",  time: 10000 },
     { shot: "wide",  time: 3500 }
   ];
-  const duoSequences = {
-    vocalPiano: [
-      { shot: "wide", time: 5000 }, { shot: "vocal", time: 12000 },
-      { shot: "wide", time: 3500 }, { shot: "piano", time: 12000 },
-      { shot: "wide", time: 3500 }
-    ],
-    bassPiano: [
-      { shot: "wide", time: 5000 }, { shot: "bass", time: 12000 },
-      { shot: "wide", time: 3500 }, { shot: "piano", time: 12000 },
-      { shot: "wide", time: 3500 }
-    ],
-    bassVocal: [
-      { shot: "wide", time: 5000 }, { shot: "vocal", time: 12000 },
-      { shot: "wide", time: 3500 }, { shot: "bass", time: 12000 },
-      { shot: "wide", time: 3500 }
-    ]
-  };
+
+  const duoSequence = [
+    { shot: "wide",  time: 5000 },
+    { shot: "right", time: 11000 },
+    { shot: "wide",  time: 3500 },
+    { shot: "left",  time: 11000 },
+    { shot: "wide",  time: 3500 }
+  ];
 
   function getSequence() {
-    return performanceMode === "duo"
-      ? duoSequences[duoPairSelect.value]
-      : trioSequence;
+    return performanceMode === "duo" ? duoSequence : trioSequence;
   }
 
   function setPerformanceMode(mode) {
@@ -156,7 +136,6 @@ button:disabled { opacity: .45; }
     trioModeBtn.classList.toggle("selected", !isDuo);
     duoModeBtn.setAttribute("aria-pressed", String(isDuo));
     trioModeBtn.setAttribute("aria-pressed", String(!isDuo));
-    duoPairSelect.classList.toggle("hidden", !isDuo);
     // If AUTO is running, restart from the beginning of the newly selected sequence.
     if (autoMode) {
       seqIndex = 0;
@@ -169,10 +148,13 @@ button:disabled { opacity: .45; }
   // Ken Burns-style framing: begin with a tighter hero crop, then drift/zoom
   // gently over 7 seconds. Horizontal positions are proportional to viewport width.
   const shots = {
-    wide:  { zoom: 1.05, heroZoom: 1.12, x: 0,     drift: 0,     label: "WIDE" },
-    bass:  { zoom: 1.55, heroZoom: 2.30, x: 0.20,  drift: -0.067, label: "BASS" },
-    vocal: { zoom: 1.65, heroZoom: 2.00, x: 0,     drift: 0.033,  label: "VOCAL" },
-    piano: { zoom: 1.55, heroZoom: 2.20, x: -0.20, drift: 0.067,  label: "PIANO" }
+    wide:  { zoom: 1.05, heroZoom: 1.12, x: 0,      drift: 0,      label: "WIDE" },
+    // DUO positions: framing is based on screen side, not instrument/performer.
+    right: { zoom: 1.58, heroZoom: 2.12, x: 0.19,   drift: -0.045, label: "RIGHT" },
+    left:  { zoom: 1.58, heroZoom: 2.12, x: -0.19,  drift: 0.045,  label: "LEFT" },
+    bass:  { zoom: 1.55, heroZoom: 2.30, x: 0.20,   drift: -0.067, label: "BASS" },
+    vocal: { zoom: 1.65, heroZoom: 2.00, x: 0,      drift: 0.033,  label: "VOCAL" },
+    piano: { zoom: 1.55, heroZoom: 2.20, x: -0.20,  drift: 0.067,  label: "PIANO" }
   };
 
   // Status text is intentionally never shown on screen.
@@ -329,15 +311,7 @@ button:disabled { opacity: .45; }
   cam2Btn.addEventListener("click", () => startCamera("user"));
   duoModeBtn.addEventListener("click", () => setPerformanceMode("duo"));
   trioModeBtn.addEventListener("click", () => setPerformanceMode("trio"));
-  duoPairSelect.addEventListener("change", () => {
-    if (autoMode) {
-      seqIndex = 0;
-      clearTimeout(autoTimer);
-      runAuto();
-    }
-    showUI();
-  });
-  autoBtn.addEventListener("click", () => {
+autoBtn.addEventListener("click", () => {
     if (autoMode) {
       stopAuto();
       showUI();
