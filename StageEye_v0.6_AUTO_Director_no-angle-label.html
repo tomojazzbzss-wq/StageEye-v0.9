@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="theme-color" content="#000000">
+<title>StageEye v0.6 AUTO Director</title>
+<style>
+:root { color-scheme: dark; }
+* { box-sizing: border-box; }
+html, body {
+  margin: 0; padding: 0; width: 100%; height: 100%;
+  overflow: hidden; background: #000; color: #fff;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  touch-action: manipulation;
+}
+#stage { position: fixed; inset: 0; overflow: hidden; background: #000; }
+#video {
+  position: absolute; left: 50%; top: 50%;
+  width: 100%; height: 100%; object-fit: cover;
+  transform: translate(-50%, -50%) scale(1);
+  transform-origin: center center;
+  transition: transform 5s ease-in-out;
+  background: #000;
+}
+#fadeLayer {
+  position: absolute; inset: 0; background: #000; opacity: 0;
+  pointer-events: none; z-index: 10; transition: opacity .35s ease;
+}
+/* アングル名・ステータス表示を画面上部に出さない */
+#status { display: none !important; }
+#controls {
+  position: absolute; left: 0; right: 0;
+  bottom: max(12px, env(safe-area-inset-bottom));
+  display: flex; justify-content: center; align-items: center;
+  gap: 12px; padding: 12px; z-index: 30;
+  transition: opacity .35s ease;
+}
+#controls.hidden { opacity: 0; pointer-events: none; }
+button {
+  border: 1px solid rgba(255,255,255,.22); border-radius: 12px;
+  min-width: 86px; padding: 14px 20px; font-size: 17px;
+  font-weight: 700; letter-spacing: .04em;
+  background: rgba(35,35,35,.92); color: #fff;
+  -webkit-appearance: none; appearance: none;
+}
+button:active { transform: scale(.97); }
+button:disabled { opacity: .45; }
+#autoBtn { min-width: 138px; background: #145b43; border-color: #3a9c78; }
+#autoBtn.running { background: #8a302b; border-color: #d16b63; }
+#cam1Btn, #cam2Btn { min-width: 74px; padding-inline: 14px; }
+@media (max-width: 380px) {
+  #controls { gap: 7px; padding: 8px; }
+  button { min-width: 72px; padding: 13px 12px; font-size: 15px; }
+  #autoBtn { min-width: 112px; }
+}
+@media (orientation: portrait) {
+  #status { top: max(10px, env(safe-area-inset-top)); }
+}
+</style>
+<script type="text/javascript" nonce="9fbb8002d6cb41a3b18e3dd4e8e" src="//local.adguard.org?ts=1791991275672&amp;type=content-script&amp;dmn=chatgpt.com&amp;url=https%3A%2F%2Fchatgpt.com%2Fbackend-api%2Festuary%2Fcontent%3Fid%3Dfile_000000007e6881f58c466314794a5648%26fn%3DStageEye_v0.6_AUTO_Director_no-angle-label.html%26cd%3Dattachment%26ts%3D497776%26p%3Dfs%26cid%3D1%26sig%3D201c9651364a2fee292be24d53f2c90fc27b5f09eaa773ccc679cab0009b3ea8%26v%3D0&amp;app=chrome.exe&amp;css=2&amp;js=1&amp;rel=1&amp;rji=1&amp;sbe=1"></script><script type="text/javascript" nonce="9fbb8002d6cb41a3b18e3dd4e8e" src="//local.adguard.org?ts=1791991275672&amp;name=AdGuard%20Extra&amp;name=AdGuard%20Popup%20Blocker&amp;type=user-script"></script></head>
+<body>
+<div id="stage">
+  <video id="video" autoplay playsinline muted></video>
+  <div id="fadeLayer"></div>
+  <div id="status" role="status" aria-live="polite">CAMERA READY · CAM1 / CAM2</div>
+  <div id="controls">
+    <button id="cam1Btn" type="button">CAM1</button>
+    <button id="autoBtn" type="button" aria-pressed="false">AUTO START</button>
+    <button id="cam2Btn" type="button">CAM2</button>
+  </div>
+</div>
+<script>
+(() => {
+  "use strict";
+
+  const video = document.getElementById("video");
+  const fadeLayer = document.getElementById("fadeLayer");
+  const controls = document.getElementById("controls");
+  const statusEl = document.getElementById("status");
+  const autoBtn = document.getElementById("autoBtn");
+  const cam1Btn = document.getElementById("cam1Btn");
+  const cam2Btn = document.getElementById("cam2Btn");
+
+  let currentStream = null;
+  let activeFacing = null;
+  let autoMode = false;
+  let autoTimer = null;
+  let transitionTimers = [];
+  let hideTimer = null;
+  let seqIndex = 0;
+  let cameraBusy = false;
+  let lastShot = "wide";
+
+  // Adjust these durations to suit the performance. Values are milliseconds.
+  // Shots are center-biased because the usable stage width varies by device.
+  const sequence = [
+    { shot: "wide",  time: 5000 },
+    { shot: "vocal", time: 11000 },
+    { shot: "wide",  time: 3500 },
+    { shot: "piano", time: 10000 },
+    { shot: "wide",  time: 3500 },
+    { shot: "bass",  time: 10000 },
+    { shot: "wide",  time: 3500 }
+  ];
+
+  const shots = {
+    wide:  { zoom: 1.00, x: 0,    label: "WIDE · STAGE" },
+    bass:  { zoom: 1.65, x: 0.20, label: "BASS · CLOSE" },
+    vocal: { zoom: 1.55, x: 0,    label: "VOCAL · CLOSE" },
+    piano: { zoom: 1.60, x: -0.20, label: "PIANO · CLOSE" }
+  };
+
+  function setStatus(message) {
+    statusEl.textContent = message;
+  }
+
+  function clearTransitionTimers() {
+    transitionTimers.forEach(clearTimeout);
+    transitionTimers = [];
+  }
+
+  function showUI() {
+    controls.classList.remove("hidden");
+    clearTimeout(hideTimer);
+    hideTimer = setTimeout(() => {
+      // Keep controls visible until a camera is active or AUTO is running.
+      if (currentStream || autoMode) controls.classList.add("hidden");
+    }, 5000);
+  }
+
+  function scheduleTransition(fn, delay) {
+    const id = setTimeout(fn, delay);
+    transitionTimers.push(id);
+  }
+
+  function applyShot(name) {
+    const shot = shots[name];
+    if (!shot) return;
+    lastShot = name;
+    clearTransitionTimers();
+
+    // Use a fraction of the current viewport width rather than fixed pixels.
+    const shiftPx = Math.round(window.innerWidth * shot.x);
+    fadeLayer.style.opacity = "1";
+
+    scheduleTransition(() => {
+      video.style.transition = "none";
+      video.style.transform =
+        `translate(-50%, -50%) translateX(${shiftPx}px) scale(${shot.zoom})`;
+    }, 180);
+
+    scheduleTransition(() => {
+      fadeLayer.style.opacity = "0";
+      video.style.transition = "transform 5s ease-in-out";
+      setStatus(autoMode ? `AUTO · ${shot.label}` : shot.label);
+    }, 420);
+  }
+
+  function stopAuto() {
+    autoMode = false;
+    clearTimeout(autoTimer);
+    autoTimer = null;
+    autoBtn.textContent = "AUTO START";
+    autoBtn.classList.remove("running");
+    autoBtn.setAttribute("aria-pressed", "false");
+    setStatus(currentStream ? "CAMERA READY" : "CAMERA OFF");
+  }
+
+  function runAuto() {
+    if (!autoMode) return;
+    const step = sequence[seqIndex];
+    applyShot(step.shot);
+    clearTimeout(autoTimer);
+    autoTimer = setTimeout(() => {
+      if (!autoMode) return;
+      seqIndex = (seqIndex + 1) % sequence.length;
+      runAuto();
+    }, step.time);
+  }
+
+  function startAuto() {
+    if (!currentStream) {
+      setStatus("先に CAM1 または CAM2 を起動してください");
+      showUI();
+      return;
+    }
+    autoMode = true;
+    seqIndex = 0;
+    autoBtn.textContent = "AUTO STOP";
+    autoBtn.classList.add("running");
+    autoBtn.setAttribute("aria-pressed", "true");
+    runAuto();
+    showUI();
+  }
+
+  async function startCamera(facing) {
+    if (cameraBusy) return;
+    cameraBusy = true;
+    cam1Btn.disabled = true;
+    cam2Btn.disabled = true;
+    setStatus("CAMERA STARTING…");
+    showUI();
+
+    // Stop AUTO while switching camera so the sequence does not race the transition.
+    stopAuto();
+
+    try {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error("この環境ではカメラを利用できません。HTTPSで開いてください。");
+      }
+
+      const oldStream = currentStream;
+      currentStream = null;
+      if (oldStream) oldStream.getTracks().forEach(track => track.stop());
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: {
+          facingMode: { ideal: facing },
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          frameRate: { ideal: 24, max: 30 }
+        }
+      });
+
+      currentStream = stream;
+      activeFacing = facing;
+      video.srcObject = stream;
+      await video.play();
+
+      // A camera change starts from the safe wide framing.
+      applyShot("wide");
+      setStatus(facing === "environment" ? "CAM1 · REAR CAMERA" : "CAM2 · FRONT CAMERA");
+    } catch (err) {
+      const name = err && err.name ? err.name : "CameraError";
+      const message = err && err.message ? err.message : "カメラを起動できませんでした。";
+      setStatus("CAMERA ERROR · " + name);
+      alert("カメラを起動できませんでした。\n\n" + name + "\n" + message +
+        "\n\nSafariでHTTPSのページを開き、カメラの使用を許可してください。");
+    } finally {
+      cameraBusy = false;
+      cam1Btn.disabled = false;
+      cam2Btn.disabled = false;
+      showUI();
+    }
+  }
+
+  cam1Btn.addEventListener("click", () => startCamera("environment"));
+  cam2Btn.addEventListener("click", () => startCamera("user"));
+  autoBtn.addEventListener("click", () => {
+    if (autoMode) {
+      stopAuto();
+      showUI();
+    } else {
+      startAuto();
+    }
+  });
+
+  // Tapping the picture reveals the controls; the control buttons still work normally.
+  document.getElementById("stage").addEventListener("pointerdown", (event) => {
+    if (!event.target.closest("button")) showUI();
+  });
+
+  document.addEventListener("visibilitychange", () => {
+    // Avoid timers racing in the background. Resume the sequence when Safari returns.
+    if (document.hidden) {
+      clearTimeout(autoTimer);
+    } else if (autoMode) {
+      runAuto();
+      showUI();
+    }
+  });
+
+  window.addEventListener("resize", () => {
+    // Recalculate horizontal framing for the current viewport.
+    if (currentStream && lastShot) applyShot(lastShot);
+  });
+
+  window.addEventListener("beforeunload", () => {
+    clearTimeout(autoTimer);
+    clearTimeout(hideTimer);
+    clearTransitionTimers();
+    if (currentStream) currentStream.getTracks().forEach(track => track.stop());
+  });
+
+  showUI();
+})();
+</script>
+</body>
+</html>
